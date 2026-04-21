@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Air Flowers</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#050508;overflow:hidden;width:100vw;height:100vh;font-family:monospace}
+video{position:fixed;top:0;left:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:0.25}
+canvas{position:fixed;top:0;left:0;width:100%;height:100%}
+#status{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:rgba(255,255,255,.3)}
+#status.active{color:rgba(255,180,220,.9)}
+#clear{position:fixed;top:20px;right:24px;font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:rgba(255,255,255,.3);cursor:pointer;padding:8px 14px;border:1px solid rgba(255,255,255,.15);border-radius:4px}
+#clear:hover{color:white;border-color:white}
+#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:rgba(255,255,255,.4);font-size:11px;letter-spacing:.2em;text-transform:uppercase}
+.spinner{width:36px;height:36px;border:2px solid rgba(255,255,255,.08);border-top-color:rgba(255,180,220,.6);border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas"></canvas>
+<div id="status">Zeig deine Hände!</div>
+<div id="clear" onclick="flowers=[]">✕ Löschen</div>
+<div id="loading"><div class="spinner"></div>Lade Air Flowers…</div>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script>
+const video=document.getElementById('video');
+const canvas=document.getElementById('canvas');
+const ctx=canvas.getContext('2d');
+const statusEl=document.getElementById('status');
+const loadingEl=document.getElementById('loading');
+let W,H;
+function resize(){W=canvas.width=window.innerWidth;H=canvas.height=window.innerHeight;}
+resize();window.addEventListener('resize',resize);
+
+let flowers=[];
+let handData=[];
+const TIPS=[4,8,12,16,20];
+let lastSpawn={};
+
+const FLOWER_COLORS=[
+  {petal:'hsla(340,100%,75%,',center:'hsla(50,100%,70%,'},  // Pink
+  {petal:'hsla(280,90%,75%,', center:'hsla(50,100%,70%,'},  // Lila
+  {petal:'hsla(200,100%,75%,',center:'hsla(50,100%,70%,'},  // Blau
+  {petal:'hsla(20,100%,70%,', center:'hsla(50,100%,70%,'},  // Orange
+  {petal:'hsla(160,80%,65%,', center:'hsla(50,100%,70%,'},  // Mint
+];
+
+class Flower {
+  constructor(x,y,colorIdx){
+    this.x=x; this.y=y;
+    this.size=0;
+    this.maxSize=18+Math.random()*22;
+    this.petals=5+Math.floor(Math.random()*4);
+    this.rotation=Math.random()*Math.PI*2;
+    this.rotSpeed=(Math.random()-0.5)*0.01;
+    this.color=FLOWER_COLORS[colorIdx%FLOWER_COLORS.length];
+    this.alpha=0;
+    this.growing=true;
+    this.age=0;
+    this.life=280+Math.random()*150;
+    // Stem
+    this.stemLen=30+Math.random()*40;
+    this.sway=Math.random()*0.3-0.15;
+    this.swaySpeed=0.02+Math.random()*0.02;
+  }
+
+  update(){
+    this.age++;
+    this.rotation+=this.rotSpeed;
+    if(this.growing){
+      this.size+=1.2;
+      this.alpha=Math.min(1,this.alpha+0.06);
+      if(this.size>=this.maxSize)this.growing=false;
+    }
+    if(this.age>this.life){
+      this.alpha-=0.015;
+    }
+    return this.alpha>0;
+  }
+
+  draw(ctx){
+    const sway=Math.sin(this.age*this.swaySpeed)*8*this.sway;
+    const fx=this.x+sway;
+    const fy=this.y;
+
+    // Stem
+    ctx.shadowBlur=4;
+    ctx.shadowColor='rgba(100,200,100,0.4)';
+    ctx.strokeStyle=`rgba(80,180,80,${this.alpha*0.7})`;
+    ctx.lineWidth=1.5;
+    ctx.beginPath();
+    ctx.moveTo(fx,fy);
+    ctx.quadraticCurveTo(fx+sway*2,fy+this.stemLen*0.6,fx,fy+this.stemLen);
+    ctx.stroke();
+
+    // Petals
+    ctx.save();
+    ctx.translate(fx,fy);
+    ctx.rotate(this.rotation);
+
+    for(let i=0;i<this.petals;i++){
+      const angle=(i/this.petals)*Math.PI*2;
+      const px=Math.cos(angle)*this.size*0.7;
+      const py=Math.sin(angle)*this.size*0.7;
+
+      ctx.shadowBlur=12;
+      ctx.shadowColor=this.color.petal+`${this.alpha*0.6})`;
+      ctx.fillStyle=this.color.petal+`${this.alpha*0.85})`;
+      ctx.beginPath();
+      ctx.ellipse(px,py,this.size*0.45,this.size*0.28,angle,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    // Center
+    ctx.shadowBlur=16;
+    ctx.shadowColor=this.color.center+`${this.alpha})`;
+    ctx.fillStyle=this.color.center+`${this.alpha})`;
+    ctx.beginPath();
+    ctx.arc(0,0,this.size*0.28,0,Math.PI*2);
+    ctx.fill();
+
+    // Center dots
+    ctx.fillStyle=`rgba(255,255,200,${this.alpha*0.8})`;
+    ctx.shadowBlur=0;
+    for(let i=0;i<6;i++){
+      const a=(i/6)*Math.PI*2;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a)*this.size*0.14,Math.sin(a)*this.size*0.14,1.5,0,Math.PI*2);
+      ctx.fill();
+    }
+
+    ctx.restore();
+    ctx.shadowBlur=0;
+  }
+}
+
+function spawnFlower(x,y,colorIdx){
+  if(flowers.length<120) flowers.push(new Flower(x,y,colorIdx));
+}
+
+function drawHands(){
+  const now=Date.now();
+  for(let hi=0;hi<handData.length;hi++){
+    const hand=handData[hi];
+
+    TIPS.forEach((ti,fi)=>{
+      const px=hand[ti].x*W;
+      const py=hand[ti].y*H;
+      const key=`${hi}-${fi}`;
+
+      // Blume spawnen
+      if(!lastSpawn[key]||now-lastSpawn[key]>180){
+        spawnFlower(px,py,fi+hi*5);
+        lastSpawn[key]=now;
+      }
+
+      // Fingertip Glow
+      const c=FLOWER_COLORS[fi%FLOWER_COLORS.length];
+      ctx.shadowBlur=22;
+      ctx.shadowColor=c.petal+'0.9)';
+      ctx.fillStyle=c.petal+'1)';
+      ctx.beginPath();ctx.arc(px,py,7,0,Math.PI*2);ctx.fill();
+      ctx.shadowBlur=0;
+    });
+
+    // Leichtes Skeleton
+    const C=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[0,9],[9,10],[10,11],[11,12],[0,13],[13,14],[14,15],[15,16],[0,17],[17,18],[18,19],[19,20],[5,9],[9,13],[13,17]];
+    ctx.strokeStyle='rgba(255,255,255,.08)';ctx.lineWidth=1;
+    for(const[a,b]of C){ctx.beginPath();ctx.moveTo(hand[a].x*W,hand[a].y*H);ctx.lineTo(hand[b].x*W,hand[b].y*H);ctx.stroke();}
+  }
+}
+
+function render(){
+  ctx.clearRect(0,0,W,H);
+  const vg=ctx.createRadialGradient(W/2,H/2,H*.1,W/2,H/2,H*.9);
+  vg.addColorStop(0,'rgba(2,0,8,0.85)');vg.addColorStop(1,'rgba(0,0,5,0.95)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+
+  // Update & draw flowers
+  flowers=flowers.filter(f=>f.update());
+  for(const f of flowers) f.draw(ctx);
+
+  drawHands();
+  requestAnimationFrame(render);
+}
+
+async function init(){
+  try{
+    const stream=await navigator.mediaDevices.getUserMedia({video:{width:1280,height:720,facingMode:'user'},audio:false});
+    video.srcObject=stream;await new Promise(r=>video.onloadedmetadata=r);
+    const hands=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
+    hands.setOptions({maxNumHands:2,modelComplexity:1,minDetectionConfidence:.75,minTrackingConfidence:.65});
+    hands.onResults(r=>{
+      handData=(r.multiHandLandmarks||[]).map(lm=>lm.map(p=>({x:1-p.x,y:p.y})));
+      statusEl.textContent=handData.length>0?'Male Blumen mit deinen Fingern!':'Zeig deine Hände!';
+      statusEl.className=handData.length>0?'active':'';
+    });
+    const cam=new Camera(video,{onFrame:async()=>{await hands.send({image:video});},width:1280,height:720});
+    await cam.start();loadingEl.style.display='none';render();
+  }catch(e){
+    loadingEl.innerHTML='<p style="color:rgba(255,100,100,.7)">Kamera-Zugriff verweigert.<br>Bitte erlaube die Kamera.</p>';
+  }
+}
+init();
+</script>
+</body>
+</html>
